@@ -43,9 +43,11 @@ button {font-family:inherit;cursor:pointer;user-select:none;-webkit-tap-highligh
     box-shadow:0 1px 0 #171421,0 3px 5px #0003;
 }
 .pixel-btn:disabled {opacity:.55;cursor:not-allowed;filter:grayscale(.5)}
+
+/* UPGRADE BUTTONS: SAME PRESS EFFECT AS SKILL TREE */
 .upgrade-btn:active,.upgrade-btn.pressed {
-    transform:translateY(4px) scale(.98);
-    box-shadow:none;
+    transform:translateY(6px) scale(.98);
+    box-shadow:0 1px 0 #171421,0 3px 5px #0003;
 }
 
 /* GAME BACKGROUND */
@@ -88,7 +90,10 @@ button {font-family:inherit;cursor:pointer;user-select:none;-webkit-tap-highligh
     background:#302b3c;color:white;font-size:10px;line-height:2;z-index:4;
 }
 #skillBtn {left:50%;transform:translateX(-65%)}
-#skillBtn:active,#skillBtn.pressed {transform:translateX(-65%) translateY(6px) scale(.98)}
+#skillBtn:active,#skillBtn.pressed {
+    transform:translateX(-65%) translateY(6px) scale(.98);
+    box-shadow:0 1px 0 #171421,0 3px 5px #0003;
+}
 #moreBtn {left:calc(50% + 80px);background:#eab63b;color:#292333}
 
 /* CELL AREA */
@@ -148,16 +153,6 @@ button {font-family:inherit;cursor:pointer;user-select:none;-webkit-tap-highligh
 .split-daughter.right {animation:daughterRight var(--duration) cubic-bezier(.2,.8,.2,1) forwards}
 .split-parent {opacity:0!important}
 
-/* SELL ANIMATION */
-.selling-ball {
-    animation:sellAway var(--duration) ease-in forwards!important;
-}
-@keyframes sellAway {
-    0% {transform:scale(1);opacity:1}
-    35% {transform:scale(1.15);opacity:1}
-    100% {transform:scale(.05);opacity:0}
-}
-
 /* STATS AND UPGRADES */
 #stats {
     position:absolute;top:305px;right:18px;width:245px;
@@ -188,7 +183,11 @@ button {font-family:inherit;cursor:pointer;user-select:none;-webkit-tap-highligh
 }
 #sellBtn {background:#285d40}
 #splitInfo {position:absolute;top:-35px;left:19%;font-size:17px;color:#292333;text-shadow:2px 2px white}
-#cooldown {position:absolute;top:-22px;right:10%;color:#292333;font-size:8px}
+#cooldown {
+    position:absolute;top:-35px;right:0;
+    color:#292333;font-size:8px;line-height:2;
+    text-align:right;text-shadow:1px 1px white;
+}
 
 /* NOTIFICATIONS */
 #message {
@@ -255,7 +254,9 @@ button {font-family:inherit;cursor:pointer;user-select:none;-webkit-tap-highligh
     .side-btn {width:65px;height:65px;font-size:7px}
     .side-icon {font-size:22px}
     #skillBtn {top:75px;left:44%;width:90px;height:70px;font-size:7px}
-    #skillBtn:active,#skillBtn.pressed {transform:translateX(-65%) translateY(6px) scale(.98)}
+    #skillBtn:active,#skillBtn.pressed {
+        transform:translateX(-65%) translateY(6px) scale(.98);
+    }
     #moreBtn {top:75px;left:calc(44% + 100px);width:70px;height:70px;font-size:7px}
     #center {top:200px;width:92%;min-height:330px;gap:15px}
     .ball,.split-daughter {width:83px;height:83px;border-width:8px}
@@ -266,7 +267,7 @@ button {font-family:inherit;cursor:pointer;user-select:none;-webkit-tap-highligh
     #bottom {bottom:30px;width:95%;gap:10px}
     .big-btn {height:85px;font-size:13px}
     #splitInfo {font-size:12px}
-    #cooldown {font-size:7px}
+    #cooldown {font-size:6px;top:-42px;right:0}
 }
 </style>
 </head>
@@ -365,6 +366,9 @@ let nextSell=0;
 let animating=false;
 let messageTimer=null;
 
+const SPLIT_ANIMATION_TIME=700;
+const SELL_COOLDOWN=3000;
+
 const skins={
     red:{name:"Classic Red",color:"#ed1010",dark:"#850808",light:"#ff7777",price:0},
     blue:{name:"Ocean Blue",color:"#1687ef",dark:"#07509d",light:"#82d4ff",price:150},
@@ -453,6 +457,7 @@ function render(){
         center.appendChild(extra);
     }
     saveGame();
+    updateCooldown();
 }
 
 function coinEffect(amount){
@@ -465,15 +470,16 @@ function coinEffect(amount){
     setTimeout(()=>el.remove(),1100);
 }
 
-/* Animation duration always matches split cooldown */
+/* Split animation is always quick.
+   Split cooldown still uses the player's Split Speed upgrade. */
 function animationDuration(){
-    return Math.max(.5,state.splitSpeed);
+    return SPLIT_ANIMATION_TIME/1000;
 }
 
-/* Actual cell splitting animation:
-   Each parent cell disappears while two daughter cells move apart. */
+/* Cell splitting animation */
 function splitBalls(){
     if(animating)return;
+
     const now=Date.now();
 
     if(now<nextSplit){
@@ -493,8 +499,9 @@ function splitBalls(){
     const duration=animationDuration();
 
     animating=true;
-    nextSplit=now+duration*1000;
-    nextSell=now+duration*1000;
+
+    /* Cooldown is independent from the visual animation. */
+    nextSplit=now+state.splitSpeed*1000;
 
     const overlay=document.createElement("div");
     overlay.className="split-overlay";
@@ -530,53 +537,45 @@ function splitBalls(){
         animating=false;
         render();
         notify("MITOSIS COMPLETE! +"+amount+" CELLS!");
-    },duration*1000);
+    },SPLIT_ANIMATION_TIME);
 }
 
-/* Selling animation lasts for the same duration */
+/* Instant selling:
+   Money is awarded immediately.
+   Selling has its own separate 3-second cooldown. */
 function sellBalls(){
     if(animating)return;
+
     const now=Date.now();
 
     if(now<nextSell){
         notify("SELLING IS ON COOLDOWN!");
         return;
     }
-    if(state.balls<=0){
-        notify("NO CELLS TO SELL!");
+    if(state.balls<=1){
+        notify("YOU NEED MORE THAN ONE CELL TO SELL!");
         return;
     }
 
-    const duration=animationDuration();
+    const amount=state.balls-1;
     const earned=Math.floor(
-        state.balls*state.ballValue*
+        amount*state.ballValue*
         (1+state.rebirths*.1)*
         (1+state.skills.money*.05)
     );
 
-    animating=true;
-    nextSell=now+duration*1000;
-    nextSplit=now+duration*1000;
+    /* Start only the selling cooldown. */
+    nextSell=now+SELL_COOLDOWN;
 
-    const balls=[...document.querySelectorAll("#center .ball")];
-    balls.forEach((ball,i)=>{
-        ball.classList.add("selling-ball");
-        ball.style.setProperty("--duration",duration+"s");
-        ball.style.animationDelay=(i*.035)+"s";
-    });
+    /* Instant sale: no selling animation and no waiting. */
+    state.money+=earned;
+    state.totalSold+=amount;
+    state.totalEarned+=earned;
+    state.balls=1;
 
-    notify("SELLING YOUR CELLS...");
-
-    setTimeout(()=>{
-        state.money+=earned;
-        state.totalSold+=state.balls;
-        state.totalEarned+=earned;
-        state.balls=1;
-        animating=false;
-        render();
-        coinEffect(earned);
-        notify("SOLD! +$"+earned.toLocaleString());
-    },duration*1000);
+    render();
+    coinEffect(earned);
+    notify("SOLD "+amount+" CELLS! +$"+earned.toLocaleString());
 }
 
 /* Upgrade buttons */
@@ -803,18 +802,29 @@ function resetGame(){
     notify("NEW GAME STARTED!");
 }
 
-/* Cooldown display */
+/* Cooldown display:
+   Always show the actual countdown instead of DIVIDING.
+   Split and selling cooldowns are independent. */
 function updateCooldown(){
     const now=Date.now();
-    const remaining=Math.max(0,nextSplit-now);
+    const splitRemaining=Math.max(0,nextSplit-now);
     const sellRemaining=Math.max(0,nextSell-now);
 
-    document.getElementById("cooldown").innerText=
-        animating ? "DIVIDING..." :
-        remaining>0 ? (remaining/1000).toFixed(1)+" SEC" : "";
+    const cooldownText=[];
+
+    if(splitRemaining>0){
+        cooldownText.push("SPLIT: "+(splitRemaining/1000).toFixed(1)+" SEC");
+    }
+
+    if(sellRemaining>0){
+        cooldownText.push("SELL: "+(sellRemaining/1000).toFixed(1)+" SEC");
+    }
+
+    document.getElementById("cooldown").innerText=cooldownText.join(" | ");
 
     document.getElementById("splitBtn").style.opacity=
-        (animating||remaining>0) ? ".65" : "1";
+        (animating||splitRemaining>0) ? ".65" : "1";
+
     document.getElementById("sellBtn").style.opacity=
         (animating||sellRemaining>0) ? ".65" : "1";
 }
